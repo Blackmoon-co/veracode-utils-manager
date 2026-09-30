@@ -1,4 +1,4 @@
-# Veracode Teams Manager
+# Veracode Utils Manager
 
 Utilidades en Python para administrar una organización Veracode vía REST API: **Teams**, **Users** y **Applications** (perfiles de aplicación), con cargas masivas desde CSV/XLSX.
 
@@ -7,7 +7,6 @@ Utilidades en Python para administrar una organización Veracode vía REST API: 
 ## Estructura
 
 ```
-veracode-teams-manager/
 ├── src/
 │   ├── veracode_teams_manager.py        # VeracodeTeamsManager    -> /api/authn/v2 (teams)
 │   ├── veracode_users_manager.py        # VeracodeUsersManager    -> /api/authn/v2 (users)
@@ -19,17 +18,16 @@ veracode-teams-manager/
 ├── tests/                               # unittest + mocks, sin llamadas reales a la API
 ├── data/
 │   ├── teams_example.csv
+│   ├── users_example.csv
+│   ├── apps.xlsx / apps.csv             # apps.csv es en realidad un XLSX renombrado (binario)
 │   └── desarrolladores_plantilla.xlsx   # plantilla para carga de usuarios (ver más abajo)
-├── apps.xlsx                            # entrada de ejemplo/real para create_applications
 ├── get-teams.ps1 / get-veracode-teams.ps1
-├── pipeline-scan.yml                    # Azure DevOps: build -> Pipeline Scan SAST -> Flaw Importer
 └── setup.py / requirements.txt
 ```
 
 ## Instalación
 
 ```bash
-cd veracode-teams-manager
 pip install -r requirements.txt
 ```
 
@@ -72,7 +70,7 @@ python src/create_teams_from_csv.py data/teams_example.csv
 CSV o XLSX con columnas `application_name`, `description`, `policy` (GUID), `business_criticality`, `business_unit_guid`. Encabezados se normalizan (trim, minúsculas, sin BOM). Filas con algún campo vacío se saltan con advertencia; errores por fila se imprimen y se continúa con el resto (no hay rollback ni detección de duplicados).
 
 ```bash
-python src/create_applications_from_csv.py apps.xlsx     # o .csv
+python src/create_applications_from_csv.py data/apps.xlsx     # o data/apps.csv
 ```
 
 ## Carga masiva de Usuarios
@@ -154,9 +152,5 @@ Los tests parchean `requests.request`, `open`, `os.path.exists` y `RequestsAuthP
 - `get_applications_by_business_unit` crea una instancia nueva del manager en vez de usar `self`.
 - `list_all_applications` traga excepciones por página y devuelve resultados parciales.
 - `get-veracode-teams.ps1` llama a `Get-HmacAuthorizationHeader`, no definida en ningún archivo.
-- `apps.csv` (en la raíz del repo) no es CSV real: es un XLSX con la extensión cambiada; `pd.read_csv` falla sobre él.
+- `data/apps.csv` no es CSV real: es un XLSX con la extensión cambiada; `pd.read_csv` falla sobre él.
 - El bloque `if __name__ == "__main__":` de `veracode_applications_manager.py` **crea una aplicación real** al ejecutarse — no correrlo a ciegas.
-
-## Pipeline (`pipeline-scan.yml`)
-
-Azure DevOps, 3 jobs: `Build` (Windows, NuGet + VSBuild, empaqueta `app_to_scan.zip`) → `SAST_Scan` (Ubuntu, `pipeline-scan.jar`, falla en severidad `Very High,High` pero `|| true` hace que nunca rompa el build) → `Import_Results` (`Veracode Flaw Importer@3`, crea work items). Variables secretas esperadas: `VERACODE_API_ID`, `VERACODE_API_KEY`, `VERACODE_SCA_TOKEN`.
