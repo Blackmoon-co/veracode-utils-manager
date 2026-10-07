@@ -59,8 +59,9 @@ class VeracodeUsersManager:
         response = self._make_request("GET", "roles", params={"size": 500})
         return response.get("_embedded", {}).get("roles", [])
 
-    def create_user(self, user_name, first_name, last_name, email_address, role_names, team_ids=None):
-        """Crea un usuario humano. role_names: lista de role_name; team_ids: lista de team_id."""
+    def create_user(self, user_name, first_name, last_name, email_address, role_names, team_ids=None, teams=None):
+        """Crea un usuario humano. role_names: lista de role_name; team_ids: lista de team_id
+        (o teams: lista de objetos team ya armados, p.ej. con relationship ADMIN para Team Admin)."""
         data = {
             "user_name": user_name,
             "first_name": first_name,
@@ -69,26 +70,23 @@ class VeracodeUsersManager:
             "active": True,
             "roles": [{"role_name": r} for r in role_names],
         }
-        if team_ids:
+        if teams:
+            data["teams"] = teams
+        elif team_ids:
             data["teams"] = [{"team_id": t} for t in team_ids]
 
         return self._make_request("POST", "users", data)
     
-    def update_user(self, user_id, username=None, first_name=None, last_name=None, email=None, roles=None):
-        data = {}
-        
-        if username:
-            data["username"] = username
-        if first_name:
-            data["first_name"] = first_name
-        if last_name:
-            data["last_name"] = last_name
-        if email:
-            data["email"] = email
-        if roles is not None:
-            data["roles"] = roles
-            
-        return self._make_request("PUT", f"users/{user_id}", data)  
+    def find_user(self, user_name):
+        """Busca por user_name exacto (la API no distingue mayúsculas). Devuelve el resumen o None."""
+        response = self._make_request("GET", "users", params={"user_name": user_name})
+        users = response.get("_embedded", {}).get("users", [])
+        # Se re-filtra en cliente: si la API ignorara el filtro, nunca se toca a otro usuario
+        return next((u for u in users if u["user_name"].lower() == user_name.lower()), None)
+
+    def update_user(self, user_id, data):
+        """PUT parcial: solo cambia los campos enviados. Ojo: 'roles' y 'teams' reemplazan la lista completa."""
+        return self._make_request("PUT", f"users/{user_id}", data, params={"partial": "true"})
     
 if __name__ == "__main__":
     try:

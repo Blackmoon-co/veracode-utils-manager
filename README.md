@@ -52,7 +52,7 @@ Las clases `Veracode*Manager` comparten el mismo esqueleto: autenticación HMAC 
 | Clase | Métodos | Endpoint |
 |---|---|---|
 | `VeracodeTeamsManager` | `list_teams`, `get_team`, `create_team`, `update_team`, `delete_team`, `update_team_user`, `list_all_teams(page_size=500)` | `teams[/{id}]` |
-| `VeracodeUsersManager` | `get_users`, `get_user`, `create_user`, `update_user`, `list_roles()` | `users[/{id}]`, `roles` |
+| `VeracodeUsersManager` | `get_users`, `get_user`, `find_user(user_name)`, `create_user`, `update_user(user_id, data)` (PUT `?partial=true`), `list_roles()` | `users[/{id}]`, `roles` |
 | `VeracodeApplicationsManager` | `list_applications`, `list_all_applications(page_size=100)`, `get_application`, `create_application`, `delete_application`, `get_applications_by_business_unit`, `update_application`, `update_application_policy` | `applications[/{guid}]` |
 
 `create_application` espera `policies` como un solo GUID de política (pese al plural) y `business_criticality` en `VERY_HIGH, HIGH, MEDIUM, LOW, VERY_LOW`.
@@ -79,10 +79,13 @@ python src/create_applications_from_csv.py data/apps.xlsx     # o data/apps.csv
 python src/create_users_from_file.py --list-roles                              # roles disponibles en la org
 python src/create_users_from_file.py --list-teams                              # teams disponibles (para la columna teams)
 python src/create_users_from_file.py data/desarrolladores_plantilla.xlsx --dry-run
-python src/create_users_from_file.py data/desarrolladores_plantilla.xlsx       # crea de verdad
+python src/create_users_from_file.py data/desarrolladores_plantilla.xlsx       # crea / actualiza de verdad
 ```
 
-Valida **todas** las filas contra la API antes de crear nada: si una fila falla, no se crea ningún usuario.
+- Si el `user_name` **ya existe** en Veracode, se **actualiza**: se le **suman** los roles y teams del archivo a los que ya tiene (nunca se quita nada). Si ya los tiene todos: `sin cambios`. Si el usuario está inactivo se avisa, pero no se reactiva.
+- Si **no existe**, se **crea**.
+- Reviewer y Submitter exigen al menos un team (salvo que el usuario tenga Administrator, Security Lead, Executive u otro rol con `ignore_team_restrictions`). Si el usuario nuevo no trae `teams`, o el existente no tiene ninguno, es error de validación.
+- Valida **todas** las filas contra la API antes de escribir: si una falla, no se crea ni actualiza ningún usuario.
 
 ### Columnas del archivo (.xlsx o .csv)
 
@@ -102,22 +105,22 @@ Valida **todas** las filas contra la API antes de crear nada: si una fila falla,
 
 | Perfil | Roles asignados |
 |---|---|
-| Developer | Reviewer, Submitter, Greenlight IDE User, eLearning, Security Labs User, Sandbox User |
-| Developer Lead | Reviewer, Submitter, Team Admin, Workspace Editor, Greenlight IDE User, eLearning, Security Labs User, Mitigation Approver, Sandbox Administrator, Sandbox User |
-| Technical Lead | Reviewer, Submitter, Workspace Administrator, Greenlight IDE User, eLearning, Security Labs User, Mitigation Approver, Sandbox User |
-| Architect | Reviewer, Workspace Editor, Submitter, Greenlight IDE User, eLearning, Security Labs User, Mitigation Approver, Sandbox User |
+| Developer | Reviewer, Submitter, Greenlight IDE User, Security Labs User, Sandbox User |
+| Developer Lead | Reviewer, Submitter, Team Admin, Workspace Editor, Greenlight IDE User, Security Labs User, Mitigation Approver, Sandbox Administrator, Sandbox User |
+| Technical Lead | Reviewer, Submitter, Workspace Administrator, Greenlight IDE User, Security Labs User, Mitigation Approver, Sandbox User |
+| Architect | Reviewer, Workspace Editor, Submitter, Greenlight IDE User, Security Labs User, Mitigation Approver, Sandbox User |
 | DevOps Engineer | Delete Scans, Sandbox Administrator, Submitter, Workspace Editor, Workspace Administrator, Reviewer, Creator |
 | QA / Release Engineer | Reviewer |
 | Project Manager / Product Owner | Security Insights, Team Admin, Reviewer |
-| Engineering Leader | Reviewer, Submitter, Workspace Editor, Greenlight IDE User, eLearning, Security Labs User, Mitigation Approver, Sandbox User |
+| Engineering Leader | Reviewer, Submitter, Workspace Editor, Greenlight IDE User, Security Labs User, Mitigation Approver, Sandbox User |
 | Application Stakeholder | Executive |
-| Executive / Management | Executive, eLearning |
+| Executive / Management | Executive |
 | AppSec Manager | Security Insights, Creator, Reviewer, Delete Scans |
 | Security Team Member | Executive, Mitigation Approver, Policy Administrator, Reviewer |
-| Security Risk Team | Policy Administrator, Reviewer, eLearning |
+| Security Risk Team | Policy Administrator, Reviewer |
 | Security Leader | Security Lead, Executive, Mitigation Approver, Policy Administrator, Reviewer, Delete Scans, Workspace Administrator |
 | Vulnerability Manager | Security Insights |
-| Account Administrator | Administrator, Creator, Delete Scans, Executive, Policy Administrator, eLearning, Reviewer, Sandbox Administrator, Security Lead |
+| Account Administrator | Administrator, Creator, Delete Scans, Executive, Policy Administrator, Reviewer, Sandbox Administrator, Security Lead |
 
 Esta tabla también está en la hoja **"Perfiles"** de `data/desarrolladores_plantilla.xlsx`, generada directamente desde `PROFILES` — si se toca el dict en el código, regenerar la hoja para que no quede desactualizada.
 
@@ -131,7 +134,7 @@ Hoja **"Perfiles"**: tabla de referencia (perfil → roles incluidos), la misma 
 
 - `--perfil X` — perfil default para filas sin `perfil` ni `roles` (default: `Developer`)
 - `--roles "a;b"` — roles extra default para esas mismas filas
-- `--dry-run` — valida y muestra qué se crearía, sin llamar a la API de creación
+- `--dry-run` — valida y muestra qué se crearía / actualizaría, sin escribir nada (sí hace GETs para buscar usuarios)
 - `--list-roles`, `--list-teams`
 
 ## Tests
@@ -140,7 +143,7 @@ Hoja **"Perfiles"**: tabla de referencia (perfil → roles incluidos), la misma 
 python -m unittest discover tests
 ```
 
-Los tests parchean `requests.request`, `open`, `os.path.exists` y `RequestsAuthPluginVeracodeHMAC`; no hacen llamadas de red. Cubren Teams, `create_teams_from_csv` y `build_users` (la función pura de validación de `create_users_from_file`).
+Los tests parchean `requests.request`, `open`, `os.path.exists` y `RequestsAuthPluginVeracodeHMAC`; no hacen llamadas de red. Cubren Teams, `create_teams_from_csv`, `build_users` y `plan_user` (funciones puras de `create_users_from_file`) y `find_user`/`update_user`.
 
 ## Problemas conocidos
 
@@ -148,7 +151,6 @@ Los tests parchean `requests.request`, `open`, `os.path.exists` y `RequestsAuthP
 - `setup.py` no declara `pandas` ni `openpyxl` (sí están en `requirements.txt`), y su entry point (`create-teams`) probablemente no funciona porque los módulos importan `from src....` — usar los scripts directamente.
 - `src/__main__.py` hace `from create_teams_from_csv import ...` (sin `src.`), así que `python -m src` falla salvo que `src/` esté en el path.
 - `update_application` manda `{"application_name": ...}`, pero la API appsec v1 espera el objeto `profile` completo en el PUT. Para cambiar nombre/política: GET del perfil, modificar `profile` y PUT `applications/{guid}` con el perfil completo. `update_application_policy` usa un endpoint no documentado.
-- `update_user` usa campos viejos (`username`, `email`) y hace PUT sin `?partial=true`; puede reemplazar el usuario completo. `create_user` sí usa los campos correctos (`user_name`, `email_address`, `roles:[{role_name}]`, `teams:[{team_id}]`).
 - `get_applications_by_business_unit` crea una instancia nueva del manager en vez de usar `self`.
 - `list_all_applications` traga excepciones por página y devuelve resultados parciales.
 - `get-veracode-teams.ps1` llama a `Get-HmacAuthorizationHeader`, no definida en ningún archivo.
